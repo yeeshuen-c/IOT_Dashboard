@@ -10,6 +10,7 @@ import altair as alt
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from PIL import Image
 
 # Set page configuration
 st.set_page_config(layout="wide")
@@ -21,7 +22,7 @@ MONGO_DB = "cpc2"
 MONGO_COLLECTION = "iot"
 
 # MQTT server details
-MQTT_BROKER_ADDRESS = "34.60.16.6"
+MQTT_BROKER_ADDRESS = "34.134.4.206"
 MQTT_PORT = 1883
 MQTT_TOPIC_TEMPERATURE = "iot/temperature"
 MQTT_TOPIC_SMOKE = "iot/smoke"
@@ -85,6 +86,7 @@ def on_message(client, userdata, msg):
 
     collection.insert_one(data)
     print(f"Inserted data: {data}")
+    st.session_state.data_updated = True  # Set flag to indicate data update
 
 # Callback function when connected to MQTT broker
 def on_connect(client, userdata, flags, rc):
@@ -114,14 +116,27 @@ def stop_mqtt():
         mqtt_client = None
         running = False
 
-# Function to start data collection for a specified interval
-def collect_data(interval):
-    start_mqtt()
-    time.sleep(interval)
-    stop_mqtt()
+# Function to start the MQTT client in a separate thread
+def start_mqtt_thread():
+    global mqtt_thread
+    mqtt_thread = threading.Thread(target=start_mqtt)
+    mqtt_thread.start()
+
+# Start the MQTT client in a separate thread
+start_mqtt_thread()
 
 # Streamlit app
-st.title("Temperature and Smoke Dashboard")
+st.title("Fire Detection Dashboard")
+st.markdown("This dashboard shows the temperature and smoke data collected from the IoT device to detect fires.")
+
+# Resize the image using PIL and display it
+image = Image.open("/home/yeeshuenchan13/fire.png")
+image = image.resize((600, 100))
+st.image(image, use_container_width=True)
+
+# Initialize session state for data update flag
+if 'data_updated' not in st.session_state:
+    st.session_state.data_updated = False
 
 # Sign-in section
 if 'role' not in st.session_state:
@@ -151,37 +166,33 @@ else:
 
     # Left column for graphs or latest values
     with col1:
+        # Fetch data from MongoDB
+        cursor = collection.find().sort("timestamp", -1).limit(100)
+        temperature_data = []
+        smoke_data = []
+        for doc in cursor:
+            timestamp = doc["timestamp"]
+            if isinstance(timestamp, datetime.datetime):
+                timestamp = timestamp.astimezone(malaysia_tz)
+            else:
+                timestamp = datetime.datetime.fromisoformat(timestamp).astimezone(malaysia_tz)
+            
+            if "temperature" in doc:
+                temperature_data.append({
+                    "timestamp": timestamp,
+                    "temperature": doc["temperature"]
+                })
+            if "smoke" in doc:
+                smoke_data.append({
+                    "timestamp": timestamp,
+                    "smoke": doc["smoke"]
+                })
+
+        df_temperature = pd.DataFrame(temperature_data)
+        df_smoke = pd.DataFrame(smoke_data)
+
+        # Display the data
         if role == "Admin":
-            if st.button("Refresh Data"):
-                interval = 10  # Collect data for 10 seconds
-                collect_data(interval)
-
-            # Fetch data from MongoDB
-            cursor = collection.find().sort("timestamp", -1).limit(100)
-            temperature_data = []
-            smoke_data = []
-            for doc in cursor:
-                timestamp = doc["timestamp"]
-                if isinstance(timestamp, datetime.datetime):
-                    timestamp = timestamp.astimezone(malaysia_tz)
-                else:
-                    timestamp = datetime.datetime.fromisoformat(timestamp).astimezone(malaysia_tz)
-                
-                if "temperature" in doc:
-                    temperature_data.append({
-                        "timestamp": timestamp,
-                        "temperature": doc["temperature"]
-                    })
-                if "smoke" in doc:
-                    smoke_data.append({
-                        "timestamp": timestamp,
-                        "smoke": doc["smoke"]
-                    })
-
-            df_temperature = pd.DataFrame(temperature_data)
-            df_smoke = pd.DataFrame(smoke_data)
-
-            # Display the data
             if not df_temperature.empty:
                 df_temperature['timestamp'] = pd.to_datetime(df_temperature['timestamp'])
                 df_temperature = df_temperature.sort_values(by='timestamp')
@@ -236,3 +247,9 @@ else:
             user_email = st.text_input("Enter your email for smoke alerts:")
             if st.button("Submit Email"):
                 st.write(f"Email {user_email} submitted for smoke alerts.")
+
+# Periodically refresh the page to update the graphs
+if st.session_state.data_updated:
+    st.session_state.data_updated = False
+else:
+    time.sleep(5)
