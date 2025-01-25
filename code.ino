@@ -1,33 +1,39 @@
 /*
-  ESP32 publish telemetry data to VOne Cloud (Smart Kitchen)
+  ESP32 publish telemetry data to MQTT broker
 */
 
-#include "VOneMqttClient.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
 #include "DHT.h"
 
-// Define device IDs
-const char* MQ2sensor = "ed7f6ce9-3bd2-4f6d-8dae-6d060f392c0f";    // Replace this with YOUR deviceID for the MQ2 sensor
-const char* DHT11Sensor = "29099b40-50a8-457a-865f-5c120863cb15";  // Replace this with YOUR deviceID for the DHT11 sensor
-
-// Used Pins
-const int MQ2pin = A2;          // Middle Maker Port
-const int dht11Pin = 4;         // Left side Maker Port
-const int buzzerPin = 12;       // Onboard buzzer
-
-// Input sensor
 #define DHTTYPE DHT11
+
+// WiFi credentials
+const char* WIFI_SSID = "ssid";           // Your WiFi SSID
+const char* WIFI_PASSWORD = "password";   // Your WiFi password
+
+// MQTT broker details
+const char* MQTT_SERVER = "35.225.99.3";  // Your VM instance public IP address
+const char* MQTT_TOPIC = "iot";           // MQTT topic for subscription
+const int MQTT_PORT = 1883;               // Non-TLS communication port
+
+// Sensor pins
+const int dht11Pin = 4;                   // DHT11 sensor pin
+const int MQ2pin = A2;                    // MQ2 sensor pin
+
+// DHT sensor
 DHT dht(dht11Pin, DHTTYPE);
 
-// Create an instance of VOneMqttClient
-VOneMqttClient voneClient;
+// WiFi and MQTT clients
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-// Last message time
-unsigned long lastMsgTime = 0;
-float gasValue;
+// Buffer for MQTT messages
+char buffer[128] = "";
 
+// Function to connect to WiFi
 void setup_wifi() {
   delay(10);
-  // We start by connecting to a WiFi network
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(WIFI_SSID);
@@ -42,53 +48,60 @@ void setup_wifi() {
 
   Serial.println("");
   Serial.println("WiFi connected");
-  Serial.println("IP address: ");
+  Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 }
 
+// Function to reconnect to MQTT broker
+void reconnect() {
+  while (!client.connected()) {
+    Serial.println("Attempting MQTT connection...");
+
+    if (client.connect("ESP32Client")) {
+      Serial.println("Connected to MQTT server");
+    } else {
+      Serial.print("Failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" Retrying in 5 seconds...");
+      delay(5000);
+    }
+  }
+}
+
 void setup() {
-  Serial.begin(115200);
-  setup_wifi();
-  voneClient.setup();
-  Serial.println("Gas sensor warming up!");
-  delay(20000);  // Allow the MQ-2 to warm up
-
-  // Sensor
-  dht.begin();
-
-  // Actuator
-  pinMode(buzzerPin, OUTPUT);
+  Serial.begin(115200);                     // Initiate serial communication
+  dht.begin();                              // Initialize DHT sensor
+  setup_wifi();                             // Connect to the WiFi network
+  client.setServer(MQTT_SERVER, MQTT_PORT); // Set up the MQTT client
 }
 
 void loop() {
-  if (gasValue > 2000) {
-    tone(buzzerPin, 1000);
-  } else {
-    noTone(buzzerPin);
+  if (!client.connected()) {
+    reconnect();
   }
 
-  if (!voneClient.connected()) {
-    voneClient.reconnect();
-    voneClient.publishDeviceStatusEvent(MQ2sensor, true);
-    voneClient.publishDeviceStatusEvent(DHT11Sensor, true);
-  }
-  voneClient.loop();
+  client.loop();
+  delay(5000);
 
-  unsigned long cur = millis();
-  if (cur - lastMsgTime > INTERVAL) {
-    lastMsgTime = cur;
+  // Read temperature and humidity from DHT11 sensor
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
 
-    // Publish telemetry data
-    gasValue = analogRead(MQ2pin);
-    voneClient.publishTelemetryData(MQ2sensor, "Gas detector", gasValue);
+  // Read gas value from MQ2 sensor
+  float gasValue = analogRead(MQ2pin);
 
-    // Publish telemetry data 2
-    float h = dht.readHumidity();
-    int t = dht.readTemperature();
+  // Publish temperature data
+  sprintf(buffer, "Temperature: %.2f degree Celsius", temperature);
+  client.publish(MQTT_TOPIC, buffer);
+  Serial.println(buffer);
 
-    JSONVar payloadObject;
-    payloadObject["Humidity"] = h;
-    payloadObject["Temperature"] = t;
-    voneClient.publishTelemetryData(DHT11Sensor, payloadObject);
-  }
+  // Publish humidity data
+  sprintf(buffer, "Humidity: %.2f%%", humidity);
+  client.publish(MQTT_TOPIC, buffer);
+  Serial.println(buffer);
+
+  // Publish gas value data
+  sprintf(buffer, "Gas Value: %.2f", gasValue);
+  client.publish(MQTT_TOPIC, buffer);
+  Serial.println(buffer);
 }
