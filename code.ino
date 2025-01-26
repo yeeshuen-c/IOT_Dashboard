@@ -1,10 +1,11 @@
 /*
-  ESP32 publish telemetry data to MQTT broker
+  ESP32 publish telemetry data to MQTT broker using TLS
 */
 
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include "DHT.h"
+#include <WiFiClientSecure.h>  // Include the WiFiClientSecure library
 
 #define DHTTYPE DHT11
 
@@ -15,23 +16,41 @@ const char* WIFI_PASSWORD = "password";   // Your WiFi password
 // MQTT broker details
 const char* MQTT_SERVER = "35.225.99.3";  // Your VM instance public IP address
 const char* MQTT_TOPIC = "iot";           // MQTT topic for subscription
-const int MQTT_PORT = 1883;               // Non-TLS communication port
+const int MQTT_PORT = 8883;               // TLS communication port
 
-// Sensor pins
+//CA certificate 
+const char* CA_CERT = \
+"-----BEGIN CERTIFICATE-----\n" \
+"the CA cert in here but for security reasons, doesnt show when upload to repo\n" \
+"-----END CERTIFICATE-----\n";
+
+//client certificate 
+const char* CLIENT_CERT = \
+"-----BEGIN CERTIFICATE-----\n" \
+"the client cert in here but for security reasons, doesnt show when upload to repo\n" \
+"-----END CERTIFICATE-----\n";
+
+//client key 
+const char* CLIENT_KEY = \
+"-----BEGIN PRIVATE KEY-----\n" \
+"the client key in here but for security reasons, doesnt show when upload to repo\n" \
+"-----END PRIVATE KEY-----\n";
+
+//Sensor pins
 const int dht11Pin = 4;                   // DHT11 sensor pin
 const int MQ2pin = A2;                    // MQ2 sensor pin
 
-// DHT sensor
+//DHT sensor
 DHT dht(dht11Pin, DHTTYPE);
 
-// WiFi and MQTT clients
-WiFiClient espClient;
+//   WiFi and MQTT clients
+WiFiClientSecure espClient;  // Use WiFiClientSecure for TLS
 PubSubClient client(espClient);
 
-// Buffer for MQTT messages
+//buffer for MQTT 
 char buffer[128] = "";
 
-// Function to connect to WiFi
+//connect to WiFi
 void setup_wifi() {
   delay(10);
   Serial.println();
@@ -52,7 +71,7 @@ void setup_wifi() {
   Serial.println(WiFi.localIP());
 }
 
-// Function to reconnect to MQTT broker
+//reconnect to MQTT broker
 void reconnect() {
   while (!client.connected()) {
     Serial.println("Attempting MQTT connection...");
@@ -72,6 +91,12 @@ void setup() {
   Serial.begin(115200);                     // Initiate serial communication
   dht.begin();                              // Initialize DHT sensor
   setup_wifi();                             // Connect to the WiFi network
+
+  //Set up the secure connection
+  espClient.setCACert(CA_CERT);
+  espClient.setCertificate(CLIENT_CERT);
+  espClient.setPrivateKey(CLIENT_KEY);
+
   client.setServer(MQTT_SERVER, MQTT_PORT); // Set up the MQTT client
 }
 
@@ -83,24 +108,24 @@ void loop() {
   client.loop();
   delay(5000);
 
-  // Read temperature and humidity from DHT11 sensor
+  //read temperature and humidity from DHT11 sensor
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
 
-  // Read gas value from MQ2 sensor
+  //Read gas value from MQ2 sensor
   float gasValue = analogRead(MQ2pin);
 
-  // Publish temperature data
+  //   Publish temperature data
   sprintf(buffer, "Temperature: %.2f degree Celsius", temperature);
   client.publish(MQTT_TOPIC, buffer);
   Serial.println(buffer);
 
-  // Publish humidity data
+  //humidity data
   sprintf(buffer, "Humidity: %.2f%%", humidity);
   client.publish(MQTT_TOPIC, buffer);
   Serial.println(buffer);
 
-  // Publish gas value data
+  //gas value data
   sprintf(buffer, "Gas Value: %.2f", gasValue);
   client.publish(MQTT_TOPIC, buffer);
   Serial.println(buffer);

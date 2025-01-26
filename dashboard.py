@@ -11,6 +11,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from PIL import Image
+import os
+import ssl  # Import the ssl module
 
 # Set page configuration
 st.set_page_config(layout="wide")
@@ -22,10 +24,15 @@ MONGO_DB = "cpc2"
 MONGO_COLLECTION = "iot"
 
 # MQTT server details
-MQTT_BROKER_ADDRESS = "34.134.4.206"
-MQTT_PORT = 1883
+MQTT_BROKER_ADDRESS = "34.60.209.49"
+MQTT_PORT = 8883  # Use TLS port
 MQTT_TOPIC_TEMPERATURE = "iot/temperature"
 MQTT_TOPIC_SMOKE = "iot/smoke"
+
+# Paths to the certificate files on the VM
+CA_CERT = "/etc/letsencrypt/live/firedashboard.duckdns.org/fullchain.pem"
+CLIENT_CERT = "/etc/letsencrypt/live/firedashboard.duckdns.org/cert.pem"
+CLIENT_KEY = "/etc/letsencrypt/live/firedashboard.duckdns.org/privkey.pem"
 
 # Connect to MongoDB
 mongo_client = MongoClient(MONGO_HOST, MONGO_PORT)
@@ -42,8 +49,8 @@ malaysia_tz = pytz.timezone('Asia/Kuala_Lumpur')
 
 # Email notification function
 def send_email_notification(to_email, smoke_value):
-    from_email = "your_email@example.com"
-    from_password = "your_email_password"
+    from_email = "yeeshuenchan15@gmail.com"
+    from_password = "*****"
     subject = "Smoke Alert"
     body = f"Smoke detected with value: {smoke_value} ppm"
 
@@ -103,6 +110,12 @@ def start_mqtt():
     mqtt_client = mqtt.Client()
     mqtt_client.on_connect = on_connect
     mqtt_client.on_message = on_message
+    mqtt_client.tls_set(
+        ca_certs=CA_CERT,
+        certfile=CLIENT_CERT,
+        keyfile=CLIENT_KEY,
+        tls_version=ssl.PROTOCOL_TLSv1_2
+    )
     mqtt_client.connect(MQTT_BROKER_ADDRESS, MQTT_PORT, 60)
     mqtt_client.loop_start()
     running = True
